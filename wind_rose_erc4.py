@@ -439,21 +439,27 @@ class WindRoseApp(tk.Tk):
     # ---- Polling -----------------------------------------------------------
 
     def _start_polling(self):
-        self._polling = True
+        self._stop_event = threading.Event()
         self._poll_thread = threading.Thread(target=self._poll_loop,
+                                             args=(self._stop_event,),
                                              daemon=True)
+        self._polling = True
         self._poll_thread.start()
 
     def _stop_polling(self):
         self._polling = False
+        if hasattr(self, '_stop_event'):
+            self._stop_event.set()
+        if hasattr(self, '_poll_thread') and self._poll_thread.is_alive():
+            self._poll_thread.join(timeout=3.0)
 
-    def _poll_loop(self):
-        while self._polling:
+    def _poll_loop(self, stop_event: threading.Event):
+        while not stop_event.is_set():
             az = self.client.query_azimuth()
             if az is not None:
                 self.current_az = float(az)
                 self.after(0, self._refresh_display)
-            time.sleep(1.0)
+            stop_event.wait(1.0)
 
     def _refresh_display(self):
         self.compass.update_azimuth(self.current_az, self.target_az)
