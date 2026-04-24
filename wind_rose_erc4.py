@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Wind Rose - ERC 4.0 Rotor Controller (Azimuth Only)
-Integrates with SDC (UT4LW) via UDP using GS232B protocol.
+Integrates with PstRotator via UDP (separate IN/OUT ports).
 
 Author: IW3SSD
 """
@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 # ---------------------------------------------------------------------------
-# GS232B Protocol helpers
+# PstRotator Protocol helpers
 # ---------------------------------------------------------------------------
 
 CARDINAL_DIRS = [
@@ -23,121 +23,130 @@ CARDINAL_DIRS = [
 ]
 
 
-def gs232b_query_azimuth():
-    """Return the GS232B command to query current azimuth."""
-    return b"C\r"
-
-
-def gs232b_move_to(azimuth: int):
-    """Return the GS232B command to move to a given azimuth (0-360)."""
+def pst_move_to(azimuth: int) -> bytes:
+    """Return the PstRotator command to move to a given azimuth."""
     azimuth = int(azimuth) % 360
-    return f"M{azimuth:03d}\r".encode()
+    return f"<PST><AZIMUTH>{azimuth}.0</AZIMUTH></PST>".encode("ascii")
 
 
-def gs232b_stop():
-    """Return the GS232B command to stop rotation."""
-    return b"S\r"
+def pst_stop() -> bytes:
+    """Return the PstRotator command to stop rotation."""
+    return b"<PST>STOP</PST>"
 
 
-def gs232b_rotate_left():
-    """Return the GS232B command to rotate left (CCW)."""
-    return b"L\r"
+def pst_query_azimuth() -> bytes:
+    """Return the PstRotator command to query current azimuth."""
+    return b"<PST>AZ?</PST>"
 
 
-def gs232b_rotate_right():
-    """Return the GS232B command to rotate right (CW)."""
-    return b"R\r"
+def pst_parse_azimuth(data: bytes) -> float | None:
+    """Parse azimuth from PstRotator position report.
 
-
-def gs232b_parse_azimuth(response: bytes) -> int | None:
-    """Parse azimuth from GS232B response.
-
-    Expected formats:
-      +0xxx   (e.g. +0123)
-      AZ=xxx  (e.g. AZ=123)
-      xxx     (plain number)
+    PstRotator sends back lines like 'AZ xxx.x' on the reporting port.
     Returns degrees 0-359 or None on parse failure.
     """
-    text = response.decode("ascii", errors="ignore").strip()
+    text = data.decode("ascii", errors="ignore").strip()
     try:
-        if text.startswith("+0"):
-            return int(text[2:]) % 360
-        if text.upper().startswith("AZ="):
-            return int(text[3:]) % 360
-        if text.isdigit():
-            return int(text) % 360
+        if text.upper().startswith("AZ"):
+            val = text[2:].strip()
+            if val.startswith("="):
+                val = val[1:]
+            return float(val) % 360
+        return float(text) % 360
     except (ValueError, IndexError):
         pass
     return None
 
 
 # ---------------------------------------------------------------------------
-# UDP Client for SDC integration
+# UDP Client for PstRotator (separate IN / OUT ports)
 # ---------------------------------------------------------------------------
 
 class UDPRotorClient:
-    """Sends / receives GS232B commands to SDC via UDP."""
+    """Communicates with PstRotator via UDP.
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 12000):
+    port_out: port to SEND commands to PstRotator
+    port_in:  port to RECEIVE position reports from PstRotator
+    """
+
+    def __init__(self, host: str = "127.0.0.1",
+                 port_out: int = 12000, port_in: int = 12001):
         self.host = host
-        self.port = port
-        self._sock: socket.socket | None = None
+        self.port_out = port_out
+        self.port_in = port_in
+        self._send_sock: socket.socket | None = None
+        self._recv_sock: socket.socket | None = None
         self._lock = threading.Lock()
+        self._rx_thread: threading.Thread | None = None
+        self._rx_stop = threading.Event()
+        self.current_azimuth: float | None = None
 
     def connect(self):
         with self._lock:
-            if self._sock:
-                self._sock.close()
-            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self._sock.settimeout(2.0)
+            self.disconnect_unlocked()
+            self._send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._recv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._recv_sock.settimeout(1.0)
+            self._recv_sock.bind(("", self.port_in))
+        self._rx_stop.clear()
+        self._rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
+        self._rx_thread.start()
 
     def disconnect(self):
         with self._lock:
-            if self._sock:
-                self._sock.close()
-                self._sock = None
+            self.disconnect_unlocked()
+
+    def disconnect_unlocked(self):
+        self._rx_stop.set()
+        if self._rx_thread and self._rx_thread.is_alive():
+            self._rx_thread.join(timeout=3.0)
+        self._rx_thread = None
+        if self._send_sock:
+            self._send_sock.close()
+            self._send_sock = None
+        if self._recv_sock:
+            self._recv_sock.close()
+            self._recv_sock = None
+        self.current_azimuth = None
 
     @property
     def connected(self) -> bool:
-        return self._sock is not None
+        return self._send_sock is not None
 
-    def send_command(self, cmd: bytes) -> bytes | None:
+    def _send(self, cmd: bytes):
         with self._lock:
-            if not self._sock:
-                return None
+            if self._send_sock:
+                try:
+                    self._send_sock.sendto(cmd, (self.host, self.port_out))
+                except OSError:
+                    pass
+
+    def _rx_loop(self):
+        """Listen for position reports from PstRotator on port_in."""
+        while not self._rx_stop.is_set():
+            with self._lock:
+                sock = self._recv_sock
+            if sock is None:
+                break
             try:
-                self._sock.sendto(cmd, (self.host, self.port))
-                data, _ = self._sock.recvfrom(256)
-                return data
+                data, _ = sock.recvfrom(512)
             except (socket.timeout, OSError):
-                return None
+                continue
+            az = pst_parse_azimuth(data)
+            if az is not None:
+                self.current_azimuth = az
 
-    def send_command_no_reply(self, cmd: bytes):
-        with self._lock:
-            if not self._sock:
-                return
-            try:
-                self._sock.sendto(cmd, (self.host, self.port))
-            except OSError:
-                pass
-
-    def query_azimuth(self) -> int | None:
-        resp = self.send_command(gs232b_query_azimuth())
-        if resp is not None:
-            return gs232b_parse_azimuth(resp)
-        return None
+    def query_azimuth(self) -> float | None:
+        self._send(pst_query_azimuth())
+        time.sleep(0.3)
+        return self.current_azimuth
 
     def move_to(self, azimuth: int):
-        self.send_command_no_reply(gs232b_move_to(azimuth))
+        self._send(pst_move_to(azimuth))
 
     def stop(self):
-        self.send_command_no_reply(gs232b_stop())
-
-    def rotate_left(self):
-        self.send_command_no_reply(gs232b_rotate_left())
-
-    def rotate_right(self):
-        self.send_command_no_reply(gs232b_rotate_right())
+        self._send(pst_stop())
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +278,7 @@ class WindRoseApp(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Wind Rose \u2014 ERC 4.0 Azimuth Controller (GS232B/UDP)")
+        self.title("Wind Rose \u2014 ERC 4.0 Azimuth Controller (PstRotator/UDP)")
         self.configure(bg="#0f0f23")
         self.resizable(False, False)
 
@@ -313,7 +322,7 @@ class WindRoseApp(tk.Tk):
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
     def _build_connection_frame(self, parent):
-        f = tk.LabelFrame(parent, text="Connessione UDP (SDC)",
+        f = tk.LabelFrame(parent, text="Connessione UDP (PstRotator)",
                           bg="#0f0f23", fg="#eee",
                           font=("Helvetica", 10, "bold"))
         f.pack(fill=tk.X, pady=(0, 8))
@@ -321,16 +330,23 @@ class WindRoseApp(tk.Tk):
         row1 = tk.Frame(f, bg="#0f0f23")
         row1.pack(fill=tk.X, padx=6, pady=2)
         tk.Label(row1, text="Host:", bg="#0f0f23", fg="#ccc",
-                 width=6, anchor=tk.W).pack(side=tk.LEFT)
+                 width=8, anchor=tk.W).pack(side=tk.LEFT)
         self.host_var = tk.StringVar(value="127.0.0.1")
         tk.Entry(row1, textvariable=self.host_var, width=16).pack(side=tk.LEFT)
 
         row2 = tk.Frame(f, bg="#0f0f23")
         row2.pack(fill=tk.X, padx=6, pady=2)
-        tk.Label(row2, text="Porta:", bg="#0f0f23", fg="#ccc",
-                 width=6, anchor=tk.W).pack(side=tk.LEFT)
-        self.port_var = tk.StringVar(value="12000")
-        tk.Entry(row2, textvariable=self.port_var, width=16).pack(side=tk.LEFT)
+        tk.Label(row2, text="Porta OUT:", bg="#0f0f23", fg="#ccc",
+                 width=8, anchor=tk.W).pack(side=tk.LEFT)
+        self.port_out_var = tk.StringVar(value="12000")
+        tk.Entry(row2, textvariable=self.port_out_var, width=16).pack(side=tk.LEFT)
+
+        row2b = tk.Frame(f, bg="#0f0f23")
+        row2b.pack(fill=tk.X, padx=6, pady=2)
+        tk.Label(row2b, text="Porta IN:", bg="#0f0f23", fg="#ccc",
+                 width=8, anchor=tk.W).pack(side=tk.LEFT)
+        self.port_in_var = tk.StringVar(value="12001")
+        tk.Entry(row2b, textvariable=self.port_in_var, width=16).pack(side=tk.LEFT)
 
         row3 = tk.Frame(f, bg="#0f0f23")
         row3.pack(fill=tk.X, padx=6, pady=(4, 6))
@@ -403,12 +419,12 @@ class WindRoseApp(tk.Tk):
         row = tk.Frame(f, bg="#0f0f23")
         row.pack(padx=6, pady=6)
 
-        tk.Button(row, text="\u25c0 CCW", command=self._rotate_ccw,
+        tk.Button(row, text="\u25c0 -10\u00b0", command=lambda: self._nudge(-10),
                   bg="#16213e", fg="white",
                   activebackground="#1a5276",
                   font=("Helvetica", 10),
                   width=8).pack(side=tk.LEFT, padx=(0, 4))
-        tk.Button(row, text="CW \u25b6", command=self._rotate_cw,
+        tk.Button(row, text="+10\u00b0 \u25b6", command=lambda: self._nudge(10),
                   bg="#16213e", fg="white",
                   activebackground="#1a5276",
                   font=("Helvetica", 10),
@@ -425,15 +441,21 @@ class WindRoseApp(tk.Tk):
         else:
             host = self.host_var.get().strip()
             try:
-                port = int(self.port_var.get().strip())
+                port_out = int(self.port_out_var.get().strip())
             except ValueError:
-                messagebox.showerror("Errore", "Porta non valida")
+                messagebox.showerror("Errore", "Porta OUT non valida")
+                return
+            try:
+                port_in = int(self.port_in_var.get().strip())
+            except ValueError:
+                messagebox.showerror("Errore", "Porta IN non valida")
                 return
             self.client.host = host
-            self.client.port = port
+            self.client.port_out = port_out
+            self.client.port_in = port_in
             self.client.connect()
             self.btn_connect.config(text="Disconnetti", bg="#e94560")
-            self._update_status(f"Connesso a {host}:{port}")
+            self._update_status(f"Connesso a {host} (OUT:{port_out} / IN:{port_in})")
             self._start_polling()
 
     # ---- Polling -----------------------------------------------------------
@@ -497,19 +519,10 @@ class WindRoseApp(tk.Tk):
             self.client.stop()
         self._update_status("STOP")
 
-    def _rotate_ccw(self):
-        if self.client.connected:
-            self.client.rotate_left()
-            self._update_status("Rotazione CCW")
-        else:
-            self._update_status("Non connesso")
-
-    def _rotate_cw(self):
-        if self.client.connected:
-            self.client.rotate_right()
-            self._update_status("Rotazione CW")
-        else:
-            self._update_status("Non connesso")
+    def _nudge(self, delta: int):
+        """Move the antenna by delta degrees from current position."""
+        new_az = int(self.current_az + delta) % 360
+        self._go_to(new_az)
 
     # ---- Helpers -----------------------------------------------------------
 
