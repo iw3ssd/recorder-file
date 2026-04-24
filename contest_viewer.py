@@ -5,14 +5,22 @@ Visualizza i contest a cui un nominativo sta partecipando su contestonlinescore.
 
 Autore: Devin per IW3SSD
 """
+from __future__ import annotations
 
+import sys
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 from urllib.parse import urljoin
 
-import requests
-from bs4 import BeautifulSoup
+try:
+    import requests
+    from bs4 import BeautifulSoup
+except ImportError:
+    print("Errore: librerie mancanti. Installa con:")
+    print("  pip install requests beautifulsoup4")
+    input("Premi Invio per chiudere...")
+    sys.exit(1)
 
 BASE_URL = "https://contestonlinescore.com"
 SCOREBOARD_URL = f"{BASE_URL}/scoreboard/"
@@ -38,7 +46,7 @@ def fetch_page(url: str, params: dict | None = None) -> str | None:
 
 def parse_contest_list(html: str) -> list[dict]:
     """Return [{id, name, status}, ...] from the <select> dropdown."""
-    contests: list[dict] = []
+    contests = []
     soup = BeautifulSoup(html, "html.parser")
     select = soup.find("select", {"name": "contest_id"})
     if not select:
@@ -76,7 +84,7 @@ def search_callsign_in_scoreboard(html: str, callsign: str) -> list[dict]:
     Search for *callsign* in a scoreboard page.
     Returns list of dicts with keys: rank, call, score, qso, unique, club, category.
     """
-    results: list[dict] = []
+    results = []
     call_upper = callsign.upper()
     soup = BeautifulSoup(html, "html.parser")
 
@@ -141,7 +149,7 @@ def fetch_archive_contests() -> list[dict]:
     if not html:
         return []
     soup = BeautifulSoup(html, "html.parser")
-    entries: list[dict] = []
+    entries = []
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"]
         if "contest_id" in href and "archive" in href:
@@ -264,7 +272,7 @@ class ContestViewerApp:
         self.btn_open.pack(side=tk.RIGHT)
 
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
-        self._contest_urls: dict[str, str] = {}  # iid -> URL
+        self._contest_urls = {}  # iid -> URL
 
     # ---- Actions -----------------------------------------------------------
 
