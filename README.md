@@ -99,6 +99,43 @@ python3 contest_viewer.py
 
 ---
 
+## Eseguibili Windows (.exe)
+
+Entrambe le applicazioni possono essere compilate come eseguibili Windows standalone (non serve Python installato).
+
+### Download
+
+Scarica gli `.exe` dalla pagina [Releases](../../releases) di questo repository.
+
+| Eseguibile | Applicazione |
+|---|---|
+| `WindRose_ERC4.exe` | Wind Rose — ERC 4.0 Azimuth Controller |
+| `ContestViewer.exe` | Contest Online ScoreBoard Viewer |
+
+### Build manuale (su Windows)
+
+1. Installa [Python 3.10+](https://www.python.org/downloads/)
+2. Esegui lo script:
+
+```batch
+build_windows.bat
+```
+
+Gli eseguibili saranno in `dist\`.
+
+### Build automatica (GitHub Actions)
+
+La workflow **Build Windows Executables** compila automaticamente gli `.exe` quando si crea un tag `v*`:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Oppure puoi avviare la build manualmente dalla tab **Actions** del repository.
+
+---
+
 ## Licenza
 
 Uso libero per radioamatori.

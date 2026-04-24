@@ -1,0 +1,6 @@
+# Contest Viewer dependencies
+requests>=2.28
+beautifulsoup4>=4.11
+
+# Build / packaging
+pyinstaller>=6.0
