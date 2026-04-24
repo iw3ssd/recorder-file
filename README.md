@@ -63,6 +63,42 @@ Assicurarsi che l'ERC 4.0 sia configurato con:
 - Baudrate: **9600** (o secondo configurazione)
 - In SDC: creare un ponte UDP verso la porta COM del ERC 4.0
 
+---
+
+# Contest Online ScoreBoard — Viewer
+
+Applicazione Python/tkinter per visualizzare i contest a cui un nominativo sta partecipando su [contestonlinescore.com](https://contestonlinescore.com/).
+
+## Funzionalita'
+
+- **Ricerca per nominativo**: inserisci il callsign e cerca in tutti i contest attivi
+- **Scansione automatica**: analizza tutti i contest correnti (closed, on air)
+- **Tabella risultati**: mostra contest, categoria, posizione, punteggio, QSO, unici, club
+- **Apri nel browser**: click per aprire il contest selezionato su contestonlinescore.com
+- **Barra di progresso**: indica l'avanzamento della scansione
+
+## Requisiti
+
+- Python 3.10+
+- `requests` e `beautifulsoup4`
+
+```bash
+pip3 install requests beautifulsoup4
+```
+
+## Utilizzo
+
+```bash
+python3 contest_viewer.py
+```
+
+1. Il nominativo predefinito e' **IW3SSD** (modificabile)
+2. Clicca **Cerca** per avviare la scansione
+3. I risultati appariranno nella tabella
+4. Seleziona una riga e clicca **Apri nel browser** per vedere il contest completo
+
+---
+
 ## Licenza
 
 Uso libero per radioamatori.
