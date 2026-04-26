@@ -1,9 +1,9 @@
 # Wind Rose - ERC 4.0 Rotor Controller
 
-Applicazione con **rosa dei venti** per il controllo del rotore **ERC 4.0** (solo azimut), con integrazione **SDC (UT4LW)** via UDP usando il protocollo **GS232B**.
+Applicazione con **rosa dei venti** per il controllo del rotore **ERC 4.0** (solo azimut), con integrazione **PstRotator** via UDP (porte separate IN/OUT).
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
-![Protocol](https://img.shields.io/badge/Protocol-GS232B-green)
+![Protocol](https://img.shields.io/badge/Protocol-PstRotator-green)
 ![Interface](https://img.shields.io/badge/Interface-UDP-orange)
 
 ## Funzionalita'
@@ -11,16 +11,16 @@ Applicazione con **rosa dei venti** per il controllo del rotore **ERC 4.0** (sol
 - **Rosa dei venti interattiva**: clicca sulla bussola per puntare l'antenna
 - **Direzioni preimpostate**: N, NE, E, SE, S, SW, W, NW con un click
 - **Azimut manuale**: inserisci gradi (0-360) e premi VAI
-- **Rotazione continua**: CCW / CW con pulsanti dedicati
+- **Nudge ±10°**: pulsanti per spostamento relativo di ±10 gradi
 - **STOP** di emergenza
-- **Polling automatico**: legge la posizione corrente dal rotore ogni secondo
-- **Comunicazione UDP**: si integra con SDC di UT4LW via protocollo GS232B su UDP
+- **Ricezione posizione**: ascolto continuo dei report di posizione da PstRotator sulla porta UDP IN
+- **Comunicazione UDP**: porte separate per invio comandi (OUT) e ricezione posizione (IN) verso PstRotator
 
 ## Requisiti
 
 - Python 3.10+
 - Tkinter (incluso di default con Python)
-- SDC (UT4LW) configurato con porta UDP per il controllo rotore
+- PstRotator configurato con UDP Control abilitato
 
 ## Installazione
 
@@ -32,36 +32,44 @@ python3 wind_rose_erc4.py
 
 ## Utilizzo
 
-1. Avvia SDC e configura la connessione UDP per il rotore ERC 4.0
+1. Avvia **PstRotator** e abilita il controllo UDP (Setup → UDP Control)
 2. Avvia `wind_rose_erc4.py`
-3. Inserisci l'indirizzo IP e la porta UDP di SDC (default: `127.0.0.1:12000`)
+3. Configura:
+   - **Host**: indirizzo IP di PstRotator (default: `127.0.0.1`)
+   - **Porta OUT**: porta UDP per inviare comandi a PstRotator (default: `12000`)
+   - **Porta IN**: porta UDP per ricevere la posizione da PstRotator (default: `12001`)
 4. Clicca **Connetti**
 5. Usa la rosa dei venti, i pulsanti direzionali o l'azimut manuale per controllare il rotore
 
-## Protocollo GS232B
+## Protocollo PstRotator (UDP)
 
-Comandi supportati (inviati via UDP a SDC):
+Comandi inviati a PstRotator (porta OUT):
 
 | Comando | Descrizione |
 |---------|-------------|
-| `C`     | Richiedi azimut corrente |
-| `Mxxx`  | Vai all'azimut xxx (000-360) |
-| `S`     | Stop rotazione |
-| `L`     | Ruota a sinistra (CCW) |
-| `R`     | Ruota a destra (CW) |
+| `<PST><AZIMUTH>xxx.x</AZIMUTH></PST>` | Vai all'azimut xxx |
+| `<PST>AZ?</PST>` | Richiedi azimut corrente |
+| `<PST>STOP</PST>` | Stop rotazione |
+
+Risposte ricevute da PstRotator (porta IN):
+
+| Formato | Descrizione |
+|---------|-------------|
+| `AZ xxx.x` | Report posizione azimut corrente |
 
 ## Architettura
 
 ```
-Wind Rose App ---(UDP/GS232B)---> SDC (UT4LW) ---(Seriale)---> ERC 4.0 ---> Rotore
+Wind Rose App ---[UDP porta OUT]---> PstRotator ---(Seriale)---> ERC 4.0 ---> Rotore
+              <--[UDP porta IN]----  PstRotator (position reports)
 ```
 
-## Configurazione ERC 4.0
+## Configurazione PstRotator
 
-Assicurarsi che l'ERC 4.0 sia configurato con:
-- Protocollo: **GS232B**
-- Baudrate: **9600** (o secondo configurazione)
-- In SDC: creare un ponte UDP verso la porta COM del ERC 4.0
+In PstRotator:
+1. **Setup → UDP Control**: abilitare
+2. **Port**: impostare la porta UDP (default 12000) — corrisponde alla porta OUT dell'app
+3. **Position Reporting**: abilitare il report automatico della posizione — i dati verranno inviati alla porta IN dell'app
 
 ---
 
@@ -96,6 +104,43 @@ python3 contest_viewer.py
 2. Clicca **Cerca** per avviare la scansione
 3. I risultati appariranno nella tabella
 4. Seleziona una riga e clicca **Apri nel browser** per vedere il contest completo
+
+---
+
+## Eseguibili Windows (.exe)
+
+Entrambe le applicazioni possono essere compilate come eseguibili Windows standalone (non serve Python installato).
+
+### Download
+
+Scarica gli `.exe` dalla pagina [Releases](../../releases) di questo repository.
+
+| Eseguibile | Applicazione |
+|---|---|
+| `WindRose_ERC4.exe` | Wind Rose — ERC 4.0 Azimuth Controller |
+| `ContestViewer.exe` | Contest Online ScoreBoard Viewer |
+
+### Build manuale (su Windows)
+
+1. Installa [Python 3.10+](https://www.python.org/downloads/)
+2. Esegui lo script:
+
+```batch
+build_windows.bat
+```
+
+Gli eseguibili saranno in `dist\`.
+
+### Build automatica (GitHub Actions)
+
+La workflow **Build Windows Executables** compila automaticamente gli `.exe` quando si crea un tag `v*`:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Oppure puoi avviare la build manualmente dalla tab **Actions** del repository.
 
 ---
 

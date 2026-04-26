@@ -1,0 +1,51 @@
+name: Build Windows Executables
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller requests beautifulsoup4
+
+      - name: Build WindRose ERC4
+        run: pyinstaller wind_rose_erc4.spec
+
+      - name: Build ContestViewer
+        run: pyinstaller contest_viewer.spec
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-executables
+          path: |
+            dist/WindRose_ERC4.exe
+            dist/ContestViewer.exe
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/WindRose_ERC4.exe
+            dist/ContestViewer.exe
+          generate_release_notes: true
