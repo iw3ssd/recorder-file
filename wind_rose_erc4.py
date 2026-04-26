@@ -7,6 +7,7 @@ Author: IW3SSD
 """
 
 import math
+import re
 import socket
 import threading
 import time
@@ -42,18 +43,38 @@ def pst_query_azimuth() -> bytes:
 def pst_parse_azimuth(data: bytes) -> float | None:
     """Parse azimuth from PstRotator position report.
 
-    PstRotator sends back lines like 'AZ xxx.x' on the reporting port.
-    Returns degrees 0-359 or None on parse failure.
+    Handles multiple formats sent by PstRotator:
+      AZ123.0          AZ 123.0         AZ=123.0
+      AZ:123.0         123.0            +0123
+      <AZIMUTH>123.0</AZIMUTH>          (XML tag)
+    Returns degrees 0-360 or None on parse failure.
     """
     text = data.decode("ascii", errors="ignore").strip()
-    try:
-        if text.upper().startswith("AZ"):
-            val = text[2:].strip()
-            if val.startswith("="):
-                val = val[1:]
+    # XML tag: <AZIMUTH>xxx</AZIMUTH>
+    m = re.search(r'<AZIMUTH>([\d.]+)</AZIMUTH>', text, re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(1)) % 360
+        except ValueError:
+            pass
+    # AZ prefix with optional separator
+    up = text.upper()
+    if up.startswith("AZ"):
+        val = text[2:].lstrip(":= ")
+        try:
             return float(val) % 360
+        except ValueError:
+            pass
+    # +0xxx format
+    if text.startswith("+0"):
+        try:
+            return float(text[2:]) % 360
+        except ValueError:
+            pass
+    # Plain number
+    try:
         return float(text) % 360
-    except (ValueError, IndexError):
+    except ValueError:
         pass
     return None
 
@@ -133,13 +154,22 @@ class UDPRotorClient:
                 data, _ = sock.recvfrom(512)
             except (socket.timeout, OSError):
                 continue
+            self._last_raw = data
             az = pst_parse_azimuth(data)
             if az is not None:
                 self.current_azimuth = az
 
+    @property
+    def last_raw(self) -> str:
+        """Last raw data received (for debug)."""
+        raw = getattr(self, '_last_raw', None)
+        if raw is None:
+            return ""
+        return raw.decode("ascii", errors="replace").strip()
+
     def query_azimuth(self) -> float | None:
         self._send(pst_query_azimuth())
-        time.sleep(0.3)
+        time.sleep(0.5)
         return self.current_azimuth
 
     def move_to(self, azimuth: int):
@@ -477,14 +507,21 @@ class WindRoseApp(tk.Tk):
 
     def _poll_loop(self, stop_event: threading.Event):
         while not stop_event.is_set():
-            az = self.client.query_azimuth()
+            self.client._send(pst_query_azimuth())
+            stop_event.wait(1.0)
+            az = self.client.current_azimuth
             if az is not None:
                 self.current_az = float(az)
-                self.after(0, self._refresh_display)
-            stop_event.wait(1.0)
+            self.after(0, self._refresh_display)
 
     def _refresh_display(self):
         self.compass.update_azimuth(self.current_az, self.target_az)
+        raw = self.client.last_raw
+        if raw:
+            self._update_status(f"AZ: {self.current_az:.0f}\u00b0  [RX: {raw}]")
+        elif self.client.connected:
+            self._update_status(f"AZ: {self.current_az:.0f}\u00b0  [in attesa dati...]")
+
 
     # ---- Commands ----------------------------------------------------------
 
