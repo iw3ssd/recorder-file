@@ -1,9 +1,9 @@
 # Wind Rose - ERC 4.0 Rotor Controller
 
-Applicazione con **rosa dei venti** per il controllo del rotore **ERC 4.0** (solo azimut), con integrazione **SDC (UT4LW)** via UDP usando il protocollo **GS232B**.
+Applicazione con **rosa dei venti** per il controllo del rotore **ERC 4.0** (solo azimut), con integrazione **PstRotator (YO3DMU)** e **SDC (UT4LW)** via UDP usando il protocollo **GS232B**.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
-![Protocol](https://img.shields.io/badge/Protocol-GS232B-green)
+![Protocol](https://img.shields.io/badge/Protocol-GS232B%20%7C%20PstRotator-green)
 ![Interface](https://img.shields.io/badge/Interface-UDP-orange)
 
 ## Funzionalita'
@@ -14,13 +14,19 @@ Applicazione con **rosa dei venti** per il controllo del rotore **ERC 4.0** (sol
 - **Rotazione continua**: CCW / CW con pulsanti dedicati
 - **STOP** di emergenza
 - **Polling automatico**: legge la posizione corrente dal rotore ogni secondo
-- **Comunicazione UDP**: si integra con SDC di UT4LW via protocollo GS232B su UDP
+- **Doppia modalita' di connessione**:
+  - **PstRotator**: comunicazione UDP con PstRotator di YO3DMU
+  - **GS232B/SDC**: comunicazione diretta UDP con SDC di UT4LW
+- **Preset (UTP)**: salva, carica ed elimina posizioni con nome personalizzato (file JSON persistente)
+- **Log comandi**: area dedicata che mostra tutti i comandi TX/RX inviati e ricevuti con timestamp
+- **Barra di stato**: mostra l'ultimo comando inviato/ricevuto in tempo reale
+- **Impostazioni persistenti**: host, porta e modalita' vengono salvati automaticamente
 
 ## Requisiti
 
 - Python 3.10+
 - Tkinter (incluso di default con Python)
-- SDC (UT4LW) configurato con porta UDP per il controllo rotore
+- PstRotator (YO3DMU) oppure SDC (UT4LW) configurato con porta UDP per il controllo rotore
 
 ## Installazione
 
@@ -30,17 +36,32 @@ cd recorder-file
 python3 wind_rose_erc4.py
 ```
 
+Nessuna dipendenza esterna richiesta: usa solo la libreria standard di Python.
+
 ## Utilizzo
 
-1. Avvia SDC e configura la connessione UDP per il rotore ERC 4.0
+1. Avvia **PstRotator** (o **SDC**) e configura la connessione UDP per il rotore ERC 4.0
 2. Avvia `wind_rose_erc4.py`
-3. Inserisci l'indirizzo IP e la porta UDP di SDC (default: `127.0.0.1:12000`)
-4. Clicca **Connetti**
-5. Usa la rosa dei venti, i pulsanti direzionali o l'azimut manuale per controllare il rotore
+3. Seleziona la modalita': **PstRotator** o **GS232B/SDC**
+4. Inserisci l'indirizzo IP e la porta UDP (default: `127.0.0.1:12000`)
+5. Clicca **Connetti**
+6. Usa la rosa dei venti, i pulsanti direzionali o l'azimut manuale per controllare il rotore
 
-## Protocollo GS232B
+### Gestione Preset (UTP)
 
-Comandi supportati (inviati via UDP a SDC):
+1. Inserisci un **nome** e un **azimut** nella sezione "Preset (UTP)"
+2. Clicca **Salva** per memorizzare il preset
+3. Seleziona un preset dalla lista e clicca **Vai** per puntare il rotore
+4. Clicca **Elimina** per rimuovere un preset
+5. I preset vengono salvati in `%APPDATA%/WindRoseERC4/presets.json` (Windows) o `~/WindRoseERC4/presets.json` (Linux/Mac)
+
+### Log Comandi
+
+L'area "Log Comandi" in basso mostra ogni comando inviato (TX) e ogni risposta ricevuta (RX) con il timestamp. La barra di stato mostra sempre l'ultimo comando.
+
+## Protocolli Supportati
+
+### GS232B (SDC/UT4LW)
 
 | Comando | Descrizione |
 |---------|-------------|
@@ -50,9 +71,21 @@ Comandi supportati (inviati via UDP a SDC):
 | `L`     | Ruota a sinistra (CCW) |
 | `R`     | Ruota a destra (CW) |
 
+### PstRotator (YO3DMU)
+
+| Comando | Descrizione |
+|---------|-------------|
+| `<PST>AZ:xxx.x</PST>` | Imposta azimut |
+| `<PST>AZ?</PST>`       | Richiedi azimut corrente |
+| `<PST>STOP</PST>`      | Stop rotazione |
+
 ## Architettura
 
 ```
+                          PstRotator Mode:
+Wind Rose App ---(UDP/PST)----> PstRotator ---(Seriale/GS232B)---> ERC 4.0 ---> Rotore
+
+                          GS232B/SDC Mode:
 Wind Rose App ---(UDP/GS232B)---> SDC (UT4LW) ---(Seriale)---> ERC 4.0 ---> Rotore
 ```
 
@@ -61,7 +94,15 @@ Wind Rose App ---(UDP/GS232B)---> SDC (UT4LW) ---(Seriale)---> ERC 4.0 ---> Roto
 Assicurarsi che l'ERC 4.0 sia configurato con:
 - Protocollo: **GS232B**
 - Baudrate: **9600** (o secondo configurazione)
+- In PstRotator: selezionare ERC 4.0 come controller e configurare la porta COM
 - In SDC: creare un ponte UDP verso la porta COM del ERC 4.0
+
+## File di Configurazione
+
+| File | Percorso | Descrizione |
+|------|----------|-------------|
+| `presets.json` | `%APPDATA%/WindRoseERC4/` | Preset salvati dall'utente |
+| `settings.json` | `%APPDATA%/WindRoseERC4/` | Impostazioni di connessione |
 
 ---
 
