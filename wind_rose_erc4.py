@@ -811,6 +811,9 @@ class WindRoseApp(tk.Tk):
     def _append_log_line(self, line: str):
         self.cmd_log_text.configure(state=tk.NORMAL)
         self.cmd_log_text.insert(tk.END, line + "\n")
+        num_lines = int(self.cmd_log_text.index("end-1c").split(".")[0])
+        if num_lines > self.MAX_LOG_LINES:
+            self.cmd_log_text.delete("1.0", f"{num_lines - self.MAX_LOG_LINES}.0")
         self.cmd_log_text.see(tk.END)
         self.cmd_log_text.configure(state=tk.DISABLED)
         # Also update status bar with last command
